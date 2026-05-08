@@ -56,3 +56,36 @@ If you discover a security vulnerability within Laravel, please send an e-mail t
 ## License
 
 The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+
+## Panduan Setup untuk Pengclone:
+Setelah git clone, mereka harus menjalankan perintah ini di terminal mereka:
+
+Install Dependencies:
+
+```bash
+composer install
+npm install && npm run build
+```
+
+Copy Environment File:
+
+```bash
+cp .env.example .env
+```
+
+Generate App Key:
+
+```bash
+php artisan key:generate
+```
+
+Konfigurasi Database:
+Buka file .env, sesuaikan DB_DATABASE : gamezone_cafe, DB_USERNAME : root, dan DB_PASSWORD.
+
+
+Migrate & Seed (Ini kuncinya):
+Jalankan perintah ini untuk membangun ulang struktur tabel dan mengisi data awal:
+
+```bash
+php artisan migrate --seed
+```
