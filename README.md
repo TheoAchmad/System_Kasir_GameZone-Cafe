@@ -80,7 +80,7 @@ php artisan key:generate
 ```
 
 Konfigurasi Database:
-Buka file .env, sesuaikan DB_DATABASE : gamezone_cafe, DB_USERNAME : root, dan DB_PASSWORD.
+Buka file .env, sesuaikan DB_DATABASE, DB_USERNAME, dan DB_PASSWORD.
 
 
 Migrate & Seed (Ini kuncinya):
