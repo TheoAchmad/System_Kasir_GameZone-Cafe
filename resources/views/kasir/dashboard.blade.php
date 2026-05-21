@@ -604,24 +604,77 @@ function renderFnBCart(){ const all=Object.values(menus).flat(); let h='',t=0; O
 async function submitFnB(){ const items=Object.entries(fnbCart).filter(([,q])=>q>0).map(([id,qty])=>({menu_id:parseInt(id),qty})); if(!items.length){ toast('Pilih menu dulu','err'); return; } try{ await api('/kasir/order/rental/'+fnbRentalId,'POST',{items}); closeModal('m-fnb'); toast('Pesanan ditambahkan!'); await refresh(); }catch(e){ toast(e.message,'err'); } }
 
 // Bayar
-function openBayar(){
-    if(!selectedPs?.rental) return;
-    const r=selectedPs.rental;
-    const sewa=r.subtotal_sewa||0, fnb=r.subtotal_menu||0;
-    byTotal=sewa+fnb;
-    byMetode='tunai';
-    document.getElementById('by-psname').textContent=selectedPs.nomor_ps;
-    document.getElementById('by-sewa').textContent=rp(sewa);
-    document.getElementById('by-fnb').textContent=rp(fnb);
-    document.getElementById('by-total').textContent=rp(byTotal);
-    document.getElementById('by-uang').value='';
-    document.getElementById('kembali-box').style.display='none';
-    ['po-tunai','po-transfer','po-qris'].forEach((id,i)=>document.getElementById(id).className='pay-opt'+(i===0?' on':''));
+async function openBayar() {
+    if (!selectedPs?.rental) return;
+ 
+    // Tampilkan modal dulu dengan loading state
+    document.getElementById('by-psname').textContent  = selectedPs.nomor_ps;
+    document.getElementById('by-sewa').textContent    = 'Menghitung...';
+    document.getElementById('by-fnb').textContent     = 'Menghitung...';
+    document.getElementById('by-total').textContent   = 'Menghitung...';
+    document.getElementById('by-uang').value          = '';
+    document.getElementById('kembali-box').style.display = 'none';
+    byMetode = 'tunai';
+    ['po-tunai','po-transfer','po-qris'].forEach((id,i) =>
+        document.getElementById(id).className = 'pay-opt' + (i === 0 ? ' on' : '')
+    );
     openModal('m-bayar');
+ 
+    // Fetch kalkulasi harga dari backend
+    try {
+        const data = await api(`/kasir/rental/${selectedPs.rental.id}/kalkulasi`);
+ 
+        byTotal = data.total;
+ 
+        document.getElementById('by-sewa').textContent  = rp(data.subtotal_sewa);
+        document.getElementById('by-fnb').textContent   = rp(data.subtotal_menu);
+        document.getElementById('by-total').textContent = rp(data.total);
+ 
+        // Auto-isi uang bayar dengan total (kasir tinggal konfirmasi)
+        document.getElementById('by-uang').value = data.total;
+        calcKembali();
+    } catch(e) {
+        toast('Gagal menghitung tagihan: ' + e.message, 'err');
+        closeModal('m-bayar');
+    }
 }
 function setMetode(m){ byMetode=m; const map={tunai:'po-tunai',transfer:'po-transfer',qris:'po-qris'}; Object.values(map).forEach(id=>document.getElementById(id).className='pay-opt'); document.getElementById(map[m]).className='pay-opt on'; }
 function calcKembali(){ const u=parseFloat(document.getElementById('by-uang').value)||0; const kb=document.getElementById('kembali-box'); if(u>=byTotal){ kb.style.display='block'; document.getElementById('kembali-amt').textContent=rp(u-byTotal); }else{ kb.style.display='none'; } }
-async function submitBayar(){ const u=parseFloat(document.getElementById('by-uang').value)||0; if(u<byTotal){ toast('Uang bayar kurang!','err'); return; } if(!confirm('Selesaikan sesi '+selectedPs.nomor_ps+'?\nTidak bisa dibatalkan.')){ return; } try{ const d=await api('/kasir/rental/'+selectedPs.rental.id+'/selesaikan','POST',{metode_bayar:byMetode,uang_bayar:u,harga_final:byTotal}); closeModal('m-bayar'); toast('Transaksi selesai! Kembalian: '+rp(d.transaksi.kembalian)); clearPanel(); await refresh(); }catch(e){ toast(e.message,'err'); } }
+async function submitBayar() {
+    const uang = parseFloat(document.getElementById('by-uang').value) || 0;
+ 
+    if (uang <= 0) { toast('Masukkan jumlah uang yang dibayar', 'err'); return; }
+    if (uang < byTotal) { toast('Uang bayar kurang!', 'err'); return; }
+ 
+    if (!confirm(
+        `Selesaikan sesi ${selectedPs.nomor_ps}?\n` +
+        `Total: ${rp(byTotal)}\n` +
+        `Kembalian: ${rp(uang - byTotal)}\n\n` +
+        `Aksi ini tidak dapat dibatalkan.`
+    )) return;
+ 
+    try {
+        const data = await api(
+            `/kasir/rental/${selectedPs.rental.id}/selesaikan`,
+            'POST',
+            {
+                metode_bayar: byMetode,
+                uang_bayar:   uang,
+            }
+        );
+ 
+        closeModal('m-bayar');
+        toast(`✅ Transaksi selesai! Kembalian: ${rp(data.transaksi.kembalian)}`);
+ 
+        // 🖨️ Buka struk otomatis di tab baru
+        openStruk(data.transaksi.id, true);
+ 
+        clearPanel();
+        await refresh();
+    } catch(e) {
+        toast(e.message, 'err');
+    }
+}
 
 // Cafe Only
 function openCafeOnly(){ cafeCart={}; cafeMetode='tunai'; document.getElementById('cafe-uang').value=''; document.getElementById('cafe-kembali-box').style.display='none'; renderCafeMenu(); renderCafeCart(); openModal('m-cafe'); }
@@ -631,11 +684,44 @@ function adjCafe(id,d){ cafeCart[id]=Math.max(0,(cafeCart[id]||0)+d); renderCafe
 function renderCafeCart(){ const all=Object.values(menus).flat(); let h=''; cafeTotal=0; Object.entries(cafeCart).forEach(([id,q])=>{ if(q<=0) return; const m=all.find(x=>x.id==id); if(!m) return; const s=m.harga*q; cafeTotal+=s; h+=`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)"><div style="flex:1;min-width:0"><div style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.nama_menu}</div><div style="font-size:11px;color:var(--purple2)">${rp(s)}</div></div><div style="display:flex;align-items:center;gap:4px;margin-left:4px"><button class="qbtn" style="width:20px;height:20px;font-size:11px" onclick="adjCafe(${id},-1)">−</button><span style="font-size:12px;min-width:14px;text-align:center">${q}</span><button class="qbtn" style="width:20px;height:20px;font-size:11px" onclick="adjCafe(${id},1)">+</button></div></div>`; }); document.getElementById('cafe-cart-list').innerHTML=h||'<div style="color:var(--t3);font-size:12px;text-align:center;padding:10px 0">Pilih menu...</div>'; document.getElementById('cafe-total').textContent=rp(cafeTotal); }
 function setCafeMetode(m){ cafeMetode=m; const map={tunai:'cpo-tunai',transfer:'cpo-transfer',qris:'cpo-qris'}; Object.values(map).forEach(id=>document.getElementById(id).className='pay-opt'); document.getElementById(map[m]).className='pay-opt on'; }
 function calcCafeKembali(){ const u=parseFloat(document.getElementById('cafe-uang').value)||0; const kb=document.getElementById('cafe-kembali-box'); if(u>=cafeTotal){ kb.style.display='block'; document.getElementById('cafe-kembali-amt').textContent=rp(u-cafeTotal); }else{ kb.style.display='none'; } }
-async function submitCafe(){ const items=Object.entries(cafeCart).filter(([,q])=>q>0).map(([id,qty])=>({menu_id:parseInt(id),qty})); if(!items.length){ toast('Pilih menu dulu','err'); return; } const u=parseFloat(document.getElementById('cafe-uang').value)||0; if(u<cafeTotal){ toast('Uang bayar kurang!','err'); return; } try{ await api('/kasir/order/cafe-only','POST',{items,metode_bayar:cafeMetode,uang_bayar:u}); closeModal('m-cafe'); toast('Transaksi Cafe Only berhasil!'); }catch(e){ toast(e.message,'err'); } }
+async function submitCafe() {
+    const items = Object.entries(cafeCart)
+        .filter(([,q]) => q > 0)
+        .map(([id, qty]) => ({ menu_id: parseInt(id), qty }));
+ 
+    if (!items.length) { toast('Pilih menu dulu', 'err'); return; }
+ 
+    const uang = parseFloat(document.getElementById('cafe-uang').value) || 0;
+    if (uang < cafeTotal) { toast('Uang bayar kurang!', 'err'); return; }
+ 
+    try {
+        const data = await api('/kasir/order/cafe-only', 'POST', {
+            items,
+            metode_bayar: cafeMetode,
+            uang_bayar:   uang,
+        });
+ 
+        closeModal('m-cafe');
+        toast(`✅ Transaksi Cafe selesai! Kembalian: ${rp(data.transaksi.kembalian)}`);
+ 
+        // 🖨️ Buka struk otomatis di tab baru
+        openStruk(data.transaksi.id, true);
+ 
+    } catch(e) {
+        toast(e.message, 'err');
+    }
+}
 
 // ══════════════════════════════════
 // HELPERS
 // ══════════════════════════════════
+// ══════════════════════════════════
+// STRUK
+// ══════════════════════════════════
+function openStruk(transaksiId, autoprint = true) {
+    const url = `/kasir/struk/${transaksiId}` + (autoprint ? '?autoprint=1' : '');
+    window.open(url, '_blank', 'width=420,height=700,scrollbars=yes');
+}
 function fmtMs(ms){ const s=Math.floor(ms/1000); return `${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor((s%3600)/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; }
 function playAlarm(){ document.getElementById('alarm')?.play().catch(()=>{}); }
 async function refresh(){ try{ const d=await api('/kasir/api/ps-units'); psUnits=d; renderGrid(); if(selectedPs){ const f=psUnits.find(p=>p.id===selectedPs.id); f?(selectedPs=f,showPanel(f)):clearPanel(); } }catch(e){} }

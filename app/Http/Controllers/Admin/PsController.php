@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 
 class PsController extends Controller
 {
+    // GET /admin/api/ps?cabang=1
     public function index(Request $request)
     {
         $ps = PsUnit::where('cabang_id', $request->cabang)
@@ -17,6 +18,7 @@ class PsController extends Controller
         return response()->json($ps);
     }
 
+    // POST /admin/ps
     public function store(Request $request)
     {
         $request->validate([
@@ -24,17 +26,21 @@ class PsController extends Controller
             'tipe_ps'       => 'required|in:PS4,PS5',
             'harga_per_jam' => 'required|numeric|min:0',
             'status'        => 'required|in:kosong,maintenance',
-            'cabang_id'     => 'required|exists:cabang,id',
+            'cabang_id'     => 'required|integer|exists:cabang,id',
         ]);
 
-        $ps = PsUnit::create($request->only(
-            'nomor_ps', 'tipe_ps', 'harga_per_jam', 'status', 'cabang_id'
-        ));
+        $ps = PsUnit::create([
+            'nomor_ps'      => $request->nomor_ps,
+            'tipe_ps'       => $request->tipe_ps,
+            'harga_per_jam' => $request->harga_per_jam,
+            'status'        => $request->status,
+            'cabang_id'     => (int) $request->cabang_id,
+        ]);
 
         return response()->json(['success' => true, 'ps' => $ps]);
     }
 
-    // ✅ PATCH /admin/ps/{id}
+    // PATCH /admin/ps/{id}
     public function update(Request $request, PsUnit $ps)
     {
         $request->validate([
@@ -44,18 +50,22 @@ class PsController extends Controller
             'status'        => 'required|in:kosong,maintenance',
         ]);
 
-        $data = $request->only('nomor_ps', 'tipe_ps', 'harga_per_jam');
+        $data = [
+            'nomor_ps'      => $request->nomor_ps,
+            'tipe_ps'       => $request->tipe_ps,
+            'harga_per_jam' => $request->harga_per_jam,
+        ];
 
-        // Jangan ubah status jika PS sedang dipakai
         if ($ps->status !== 'dipakai') {
             $data['status'] = $request->status;
         }
 
         $ps->update($data);
 
-        return response()->json(['success' => true, 'ps' => $ps]);
+        return response()->json(['success' => true, 'ps' => $ps->fresh()]);
     }
 
+    // DELETE /admin/ps/{id}
     public function destroy(PsUnit $ps)
     {
         if ($ps->status === 'dipakai') {

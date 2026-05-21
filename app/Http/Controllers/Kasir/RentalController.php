@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\PsUnit;
 use App\Models\Rental;
 use App\Models\Transaksi;
+use App\Models\Order;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
 
@@ -36,15 +37,15 @@ class RentalController extends Controller
         }
 
         $rental = Rental::create([
-            'ps_id'          => $ps->id,
-            'kasir_id'       => auth()->id(),
-            'nama_pelanggan' => $request->nama_pelanggan,
-            'mode_billing'   => $request->mode_billing,
-            'jam_mulai'      => $jamMulai,
-            'jam_selesai'    => $jamSelesai,
-            'durasi_awal'    => $durasiMenit,
-            'durasi_tambahan'=> 0,
-            'status'         => 'berjalan',
+            'ps_id'           => $ps->id,
+            'kasir_id'        => auth()->id(),
+            'nama_pelanggan'  => $request->nama_pelanggan,
+            'mode_billing'    => $request->mode_billing,
+            'jam_mulai'       => $jamMulai,
+            'jam_selesai'     => $jamSelesai,
+            'durasi_awal'     => $durasiMenit,
+            'durasi_tambahan' => 0,
+            'status'          => 'berjalan',
         ]);
 
         $ps->update(['status' => 'dipakai']);
@@ -76,48 +77,98 @@ class RentalController extends Controller
         ]);
     }
 
+    /**
+     * Selesaikan sesi dan buat transaksi.
+     *
+     * PENTING: Backend adalah sumber kebenaran untuk harga sewa.
+     * Frontend TIDAK mengirim harga_final lagi.
+     * Backend menghitung sendiri dari data database.
+     */
+    public function kalkulasi(Rental $rental)
+{
+    if ($rental->status !== 'berjalan') {
+        return response()->json(['error' => 'Sesi tidak aktif'], 422);
+    }
+ 
+    $now         = \Carbon\Carbon::now();
+    $hargaPerJam = (float) $rental->psUnit->harga_per_jam;
+ 
+    // Hitung sewa
+    if ($rental->mode_billing === 'down') {
+        // Mode countdown: dari jam_mulai → jam_selesai yang disepakati
+        $menit     = $rental->jam_mulai->diffInMinutes($rental->jam_selesai);
+        $hargaSewa = round(($menit / 60) * $hargaPerJam);
+    } else {
+        // Mode open: dari jam_mulai → sekarang
+        $menit     = $rental->jam_mulai->diffInMinutes($now);
+        $hargaSewa = round(($menit / 60) * $hargaPerJam);
+    }
+ 
+    // Subtotal menu (hanya yang belum terikat transaksi)
+    $subtotalMenu = (int) $rental->orders()
+        ->whereNull('transaksi_id')
+        ->sum('subtotal');
+ 
+    $total = $hargaSewa + $subtotalMenu;
+ 
+    return response()->json([
+        'subtotal_sewa' => $hargaSewa,
+        'subtotal_menu' => $subtotalMenu,
+        'total'         => $total,
+        'mode_billing'  => $rental->mode_billing,
+        'jam_mulai'     => $rental->jam_mulai->format('H:i'),
+        'jam_selesai'   => $rental->jam_selesai?->format('H:i') ?? 'Open',
+    ]);
+}
+
+
     public function selesaikan(Request $request, Rental $rental)
     {
         $request->validate([
             'metode_bayar' => 'required|in:tunai,transfer,qris',
             'uang_bayar'   => 'required|numeric|min:0',
-            // harga_final dikirim dari frontend (sudah dikunci saat waktu habis)
-            'harga_final'  => 'nullable|numeric|min:0',
         ]);
 
         if ($rental->status !== 'berjalan') {
             return response()->json(['error' => 'Sesi sudah selesai'], 422);
         }
 
-        $jamSelesaiActual = Carbon::now();
-        $hargaPerJam      = $rental->psUnit->harga_per_jam;
+        $now         = Carbon::now();
+        $hargaPerJam = (float) $rental->psUnit->harga_per_jam;
 
-        // ── Kalkulasi harga sewa ──────────────────────────────
+        // ── Kalkulasi harga sewa — SEMUA di backend ──────────────────
         if ($rental->mode_billing === 'down') {
-            // MODE COUNTDOWN:
-            // Gunakan harga yang sudah dikunci di frontend (saat waktu habis)
-            // Atau hitung berdasarkan jam_selesai yang sudah ditentukan (bukan now())
-            if ($request->harga_final && $request->harga_final > 0) {
-                // Gunakan harga yang dikirim frontend (sudah terkunci)
-                $hargaSewa = (float) $request->harga_final;
-            } else {
-                // Fallback: hitung dari durasi yang disepakati (jam_mulai → jam_selesai awal)
-                $menitDisepakati = $rental->jam_mulai->diffInMinutes($rental->jam_selesai)
-                    + $rental->durasi_tambahan;
-                $hargaSewa = ($menitDisepakati / 60) * $hargaPerJam;
-            }
-            // Update jam_selesai ke waktu selesai aktual
-            $rental->update(['jam_selesai' => $jamSelesaiActual]);
+            // Mode countdown: harga dihitung dari jam_mulai → jam_selesai yang disepakati
+            // Bukan dari now(), sehingga telat checkout tidak menambah harga
+            $jamSelesaiHitung = $rental->jam_selesai; // waktu yang disepakati di awal
+
+            // Menit total = durasi awal yang disepakati (sudah include tambah waktu)
+            $menitTotal = $rental->jam_mulai->diffInMinutes($jamSelesaiHitung);
+            $hargaSewa  = round(($menitTotal / 60) * $hargaPerJam);
         } else {
-            // MODE OPEN BILLING: hitung dari now()
-            $menitActual = $rental->jam_mulai->diffInMinutes($jamSelesaiActual);
-            $hargaSewa   = ($menitActual / 60) * $hargaPerJam;
+            // Mode open billing: hitung dari now()
+            $menitTotal = $rental->jam_mulai->diffInMinutes($now);
+            $hargaSewa  = round(($menitTotal / 60) * $hargaPerJam);
         }
 
-        // Subtotal menu (orders yang belum terikat transaksi)
-        $subtotalMenu = (float) $rental->orders()->whereNull('transaksi_id')->sum('subtotal');
-        $total        = $hargaSewa + $subtotalMenu;
+        // ── Ambil pending orders ──────────────────────────────────────
+        $pendingOrders = $rental->orders()
+            ->whereNull('transaksi_id')
+            ->get();
 
+        $subtotalMenu = (int) $pendingOrders->sum('subtotal');
+
+        // ── Total ─────────────────────────────────────────────────────
+        $total    = $hargaSewa + $subtotalMenu;
+        $uangBayar = (float) $request->uang_bayar;
+
+        if ($uangBayar < $total) {
+            return response()->json([
+                'error' => "Uang bayar kurang. Total: Rp " . number_format($total, 0, ',', '.')
+            ], 422);
+        }
+
+        // ── Buat transaksi ────────────────────────────────────────────
         $transaksi = Transaksi::create([
             'rental_id'      => $rental->id,
             'kasir_id'       => auth()->id(),
@@ -126,23 +177,26 @@ class RentalController extends Controller
             'subtotal_menu'  => $subtotalMenu,
             'diskon'         => 0,
             'total_bayar'    => $total,
-            'uang_bayar'     => $request->uang_bayar,
-            'kembalian'      => $request->uang_bayar - $total,
+            'uang_bayar'     => $uangBayar,
+            'kembalian'      => $uangBayar - $total,
             'metode_bayar'   => $request->metode_bayar,
-            'tanggal'        => $jamSelesaiActual,
+            'tanggal'        => $now,
             'status_bayar'   => 'lunas',
         ]);
 
+        // ── Update rental ─────────────────────────────────────────────
         $rental->update([
-            'harga_sewa' => $hargaSewa,
-            'status'     => 'selesai',
+            'jam_selesai' => $now,
+            'harga_sewa'  => $hargaSewa,
+            'status'      => 'selesai',
         ]);
 
-        // Ikat semua orders ke transaksi ini
-        $rental->orders()->whereNull('transaksi_id')
-            ->update(['transaksi_id' => $transaksi->id]);
+        // ── Ikat orders ke transaksi ──────────────────────────────────
+        foreach ($pendingOrders as $order) {
+            $order->update(['transaksi_id' => $transaksi->id]);
+        }
 
-        // Bebaskan PS
+        // ── Bebaskan PS ───────────────────────────────────────────────
         $rental->psUnit->update(['status' => 'kosong']);
 
         return response()->json([

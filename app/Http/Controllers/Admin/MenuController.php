@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 
 class MenuController extends Controller
 {
+    // GET /admin/api/menu?cabang=1
     public function index(Request $request)
     {
         $menu = Menu::where('cabang_id', $request->cabang)
@@ -18,6 +19,7 @@ class MenuController extends Controller
         return response()->json($menu);
     }
 
+    // POST /admin/menu
     public function store(Request $request)
     {
         $request->validate([
@@ -25,7 +27,7 @@ class MenuController extends Controller
             'kategori'  => 'required|in:makanan,minuman,snack',
             'harga'     => 'required|numeric|min:0',
             'stok'      => 'required|integer|min:0',
-            'cabang_id' => 'required|exists:cabang,id',
+            'cabang_id' => 'required|integer|exists:cabang,id',
         ]);
 
         $menu = Menu::create([
@@ -33,14 +35,14 @@ class MenuController extends Controller
             'kategori'  => $request->kategori,
             'harga'     => $request->harga,
             'stok'      => $request->stok,
-            'is_aktif'  => $request->boolean('is_aktif', true),
-            'cabang_id' => $request->cabang_id,
+            'is_aktif'  => true,
+            'cabang_id' => (int) $request->cabang_id,
         ]);
 
         return response()->json(['success' => true, 'menu' => $menu]);
     }
 
-    // ✅ PATCH /admin/menu/{id}
+    // PATCH /admin/menu/{id}
     public function update(Request $request, Menu $menu)
     {
         $request->validate([
@@ -58,9 +60,10 @@ class MenuController extends Controller
             'is_aktif'  => $request->boolean('is_aktif', true),
         ]);
 
-        return response()->json(['success' => true, 'menu' => $menu]);
+        return response()->json(['success' => true, 'menu' => $menu->fresh()]);
     }
 
+    // DELETE /admin/menu/{id}
     public function destroy(Menu $menu)
     {
         $menu->delete();

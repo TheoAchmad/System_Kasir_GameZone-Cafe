@@ -11,6 +11,11 @@ use Illuminate\Http\Request;
 
 class OrderController extends Controller
 {
+    /**
+     * Tambah pesanan F&B ke rental yang sedang berjalan.
+     * Orders disimpan dengan transaksi_id = NULL dulu.
+     * transaksi_id baru diisi saat sesi diselesaikan (di RentalController::selesaikan).
+     */
     public function tambahKeRental(Request $request, Rental $rental)
     {
         $request->validate([
@@ -23,31 +28,40 @@ class OrderController extends Controller
             return response()->json(['error' => 'Sesi tidak aktif'], 422);
         }
 
-        $orders = [];
+        $created = [];
+
         foreach ($request->items as $item) {
             $menu = Menu::findOrFail($item['menu_id']);
 
             if ($menu->stok < $item['qty']) {
-                return response()->json(['error' => "Stok {$menu->nama_menu} tidak cukup ({$menu->stok} tersisa)"], 422);
+                return response()->json([
+                    'error' => "Stok {$menu->nama_menu} tidak cukup ({$menu->stok} tersisa)"
+                ], 422);
             }
 
-            $orders[] = Order::create([
-                'rental_id' => $rental->id,
-                'menu_id'   => $menu->id,
-                'qty'       => $item['qty'],
-                'harga'     => $menu->harga,
-                'subtotal'  => $menu->harga * $item['qty'],
+            // ✅ transaksi_id = NULL — akan diisi saat checkout
+            $order = Order::create([
+                'transaksi_id' => null,
+                'rental_id'    => $rental->id,
+                'menu_id'      => $menu->id,
+                'qty'          => $item['qty'],
+                'harga'        => $menu->harga,
+                'subtotal'     => $menu->harga * $item['qty'],
             ]);
 
             $menu->decrement('stok', $item['qty']);
+            $created[] = $order->load('menu');
         }
 
         return response()->json([
             'success' => true,
-            'orders'  => $orders,
+            'orders'  => $created,
         ]);
     }
 
+    /**
+     * Transaksi Cafe Only — langsung lunas tanpa rental.
+     */
     public function cafeOnly(Request $request)
     {
         $request->validate([
@@ -65,15 +79,17 @@ class OrderController extends Controller
             $menu = Menu::findOrFail($item['menu_id']);
 
             if ($menu->stok < $item['qty']) {
-                return response()->json(['error' => "Stok {$menu->nama_menu} tidak cukup"], 422);
+                return response()->json([
+                    'error' => "Stok {$menu->nama_menu} tidak cukup"
+                ], 422);
             }
 
             $sub        = $menu->harga * $item['qty'];
             $subtotal  += $sub;
-            $orderData[] = compact('menu', 'item', 'sub');
+            $orderData[] = ['menu' => $menu, 'qty' => $item['qty'], 'sub' => $sub];
         }
 
-        if ($request->uang_bayar < $subtotal) {
+        if ((float)$request->uang_bayar < $subtotal) {
             return response()->json(['error' => 'Uang bayar kurang'], 422);
         }
 
@@ -85,8 +101,8 @@ class OrderController extends Controller
             'subtotal_menu'  => $subtotal,
             'diskon'         => 0,
             'total_bayar'    => $subtotal,
-            'uang_bayar'     => $request->uang_bayar,
-            'kembalian'      => $request->uang_bayar - $subtotal,
+            'uang_bayar'     => (float) $request->uang_bayar,
+            'kembalian'      => (float) $request->uang_bayar - $subtotal,
             'metode_bayar'   => $request->metode_bayar,
             'tanggal'        => now(),
             'status_bayar'   => 'lunas',
@@ -97,11 +113,12 @@ class OrderController extends Controller
                 'transaksi_id' => $transaksi->id,
                 'rental_id'    => null,
                 'menu_id'      => $od['menu']->id,
-                'qty'          => $od['item']['qty'],
+                'qty'          => $od['qty'],
                 'harga'        => $od['menu']->harga,
                 'subtotal'     => $od['sub'],
             ]);
-            $od['menu']->decrement('stok', $od['item']['qty']);
+
+            $od['menu']->decrement('stok', $od['qty']);
         }
 
         return response()->json([

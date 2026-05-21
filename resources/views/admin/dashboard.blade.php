@@ -558,24 +558,33 @@ function editPs(ps) {
 }
 
 async function submitPs() {
-    const id     = document.getElementById('mps-id').value;
-    const body   = {
-        nomor_ps:      document.getElementById('mps-nomor').value,
-        tipe_ps:       document.getElementById('mps-tipe').value,
-        harga_per_jam: parseFloat(document.getElementById('mps-harga').value),
-        status:        document.getElementById('mps-status').value,
-        cabang_id:     activeCabang,
+    const id    = document.getElementById('mps-id').value;
+    const nomor = document.getElementById('mps-nomor').value.trim();
+    const tipe  = document.getElementById('mps-tipe').value;
+    const harga = parseFloat(document.getElementById('mps-harga').value);
+    const status= document.getElementById('mps-status').value;
+
+    if (!nomor) { toast('Nomor PS wajib diisi', 'err'); return; }
+    if (!harga || harga <= 0) { toast('Harga per jam tidak valid', 'err'); return; }
+    if (!activeCabang) { toast('Pilih cabang terlebih dahulu', 'err'); return; }
+
+    const body = {
+        nomor_ps:      nomor,
+        tipe_ps:       tipe,
+        harga_per_jam: harga,
+        status:        status,
+        cabang_id:     parseInt(activeCabang),
     };
 
     try {
         if (id) {
-            // ✅ FIX: gunakan PATCH method — route pakai method spoofing
             await api(`/admin/ps/${id}`, 'POST', { ...body, _method: 'PATCH' });
+            toast('PS berhasil diperbarui!');
         } else {
             await api('/admin/ps', 'POST', body);
+            toast('PS berhasil ditambahkan!');
         }
         closeModal('m-ps');
-        toast('PS berhasil disimpan!');
         loadPs();
     } catch(e) { toast(e.message, 'err'); }
 }
@@ -632,25 +641,36 @@ function editMenu(m) {
 }
 
 async function submitMenu() {
-    const id   = document.getElementById('mmenu-id').value;
+    const id    = document.getElementById('mmenu-id').value;
+    const nama  = document.getElementById('mmenu-nama').value.trim();
+    const kat   = document.getElementById('mmenu-kat').value;
+    const harga = parseFloat(document.getElementById('mmenu-harga').value);
+    const stok  = parseInt(document.getElementById('mmenu-stok').value);
+    const aktif = document.getElementById('mmenu-aktif').value === '1';
+
+    if (!nama) { toast('Nama menu wajib diisi', 'err'); return; }
+    if (!harga || harga <= 0) { toast('Harga tidak valid', 'err'); return; }
+    if (isNaN(stok) || stok < 0) { toast('Stok tidak valid', 'err'); return; }
+    if (!activeCabang) { toast('Pilih cabang terlebih dahulu', 'err'); return; }
+
     const body = {
-        nama_menu:  document.getElementById('mmenu-nama').value,
-        kategori:   document.getElementById('mmenu-kat').value,
-        harga:      parseFloat(document.getElementById('mmenu-harga').value),
-        stok:       parseInt(document.getElementById('mmenu-stok').value),
-        is_aktif:   document.getElementById('mmenu-aktif').value === '1',
-        cabang_id:  activeCabang,
+        nama_menu:  nama,
+        kategori:   kat,
+        harga:      harga,
+        stok:       stok,
+        is_aktif:   aktif,
+        cabang_id:  parseInt(activeCabang),
     };
 
     try {
         if (id) {
-            // ✅ FIX: gunakan PATCH method spoofing
             await api(`/admin/menu/${id}`, 'POST', { ...body, _method: 'PATCH' });
+            toast('Menu berhasil diperbarui!');
         } else {
             await api('/admin/menu', 'POST', body);
+            toast('Menu berhasil ditambahkan!');
         }
         closeModal('m-menu');
-        toast('Menu berhasil disimpan!');
         loadMenu();
     } catch(e) { toast(e.message, 'err'); }
 }

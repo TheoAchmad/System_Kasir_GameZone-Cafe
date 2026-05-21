@@ -44,7 +44,7 @@ return new class extends Migration
                 ->constrained('cabang')
                 ->nullOnDelete();
         });
-    }
+    } 
 
     public function down(): void
     {

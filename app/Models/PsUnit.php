@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use App\Models\Cabang;
 
 class PsUnit extends Model
 {
@@ -19,4 +20,9 @@ class PsUnit extends Model
     {
         return $this->hasOne(Rental::class, 'ps_id')->where('status', 'berjalan');
     }
+
+    public function cabang()
+{
+    return $this->belongsTo(Cabang::class);
+}
 }
